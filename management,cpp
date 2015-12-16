@@ -1,0 +1,268 @@
+#define  _CRT_SECURE_NO_WARNINGS
+#include "Management.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+//判断标志位是否正确
+bool IsRightSign(char chSign)
+{
+	if (chSign == 'R')
+	{
+		return true;
+	}
+	return false;
+}
+
+//读取分配表
+tagReadMenagementListReturn  ReadMenagementList()
+{
+	//数据总数量
+	unsigned int nCount = 0;
+	FILE *fpMenagementList = fopen("MenagementDateList.txt", "rb+");
+	if (fpMenagementList == NULL)
+	{
+		fpMenagementList = fopen("MenagementDateList.txt", "wb+");
+	}
+	fread(&nCount, sizeof(unsigned int), 1, fpMenagementList);
+	tagMenagementDate *ptrListAry = (tagMenagementDate *)malloc(sizeof(tagMenagementDate) * nCount);
+ 	tagReadMenagementListReturn RMLReturnValue;
+	if (nCount == 0)
+	{
+		RMLReturnValue.nCounts = 1;
+		RMLReturnValue.ptrMenagementList = NULL;
+		return RMLReturnValue;
+	}
+	else
+	{
+		for (unsigned int i = 0; i < nCount; i++)
+		{
+			
+			ptrListAry[i] = ReadMenagementONE(i);
+		}
+	}
+	RMLReturnValue.ptrMenagementList = ptrListAry;
+	RMLReturnValue.nCounts = nCount;
+	fclose(fpMenagementList);
+	return RMLReturnValue;
+}
+//读取一条文件中的分配信息
+tagMenagementDate ReadMenagementONE(int nNitem)
+{
+	FILE *fpMenagementList = fopen("MenagementDateList.txt", "rb+");
+	tagMenagementDate pMenagementList;
+	fseek(fpMenagementList, nNitem * 29 + sizeof(unsigned int), SEEK_SET);
+	fread(&pMenagementList.m_unStorageOffset, sizeof(unsigned int), 1, fpMenagementList);
+	fread(&pMenagementList.m_chSign, sizeof(char), 1, fpMenagementList);
+	fread(&pMenagementList.m_nLength, sizeof(unsigned int), 1, fpMenagementList);
+	fread(&pMenagementList.m_nNameLength, sizeof(unsigned int), 1, fpMenagementList);
+	fread(&pMenagementList.m_nLocationLength, sizeof(unsigned int), 1, fpMenagementList);
+	fread(&pMenagementList.m_nPhoneLength, sizeof(unsigned int), 1, fpMenagementList);
+	fread(&pMenagementList.m_nbirthdayLength, sizeof(unsigned int), 1, fpMenagementList);
+	fread(&pMenagementList.m_nremarkLength, sizeof(unsigned int), 1, fpMenagementList);
+	return pMenagementList;
+}
+//创建新的可分配空间
+void NewSpace(tagReadMenagementListReturn RMLReturnValue, struct tagMenagementDate Menagement, int nSubscript)
+{
+	Menagement.m_chSign = 'R';
+	Menagement.m_unStorageOffset = RMLReturnValue.ptrMenagementList[nSubscript].m_unStorageOffset + Menagement.m_nLength;
+	Menagement.m_nLength = RMLReturnValue.ptrMenagementList[nSubscript].m_nLength - Menagement.m_nLength;
+	SaveMenagementFile(Menagement, RMLReturnValue.nCounts, (RMLReturnValue.nCounts - 1) * 29 + sizeof(int));
+}
+//查询可分配空间
+int FindSpase(struct tagMenagementDate Menagement, tagReadMenagementListReturn RMLReturnValue)
+{
+	//之前一共存了nCounts条管理数据，如果遍历完都没有合适的，那只能存到最后
+	for (unsigned int i = 0; i < RMLReturnValue.nCounts; i++)
+	{
+		if (RMLReturnValue.ptrMenagementList[i].m_nLength >= Menagement.m_nLength && IsRightSign(RMLReturnValue.ptrMenagementList[i].m_chSign))
+		{
+			if (RMLReturnValue.ptrMenagementList[i].m_nLength - Menagement.m_nLength >= 8)
+			{
+				RMLReturnValue.nCounts += 1;
+				NewSpace(RMLReturnValue, Menagement, i);
+			}
+			//修改管理表
+			Menagement.m_unStorageOffset = RMLReturnValue.ptrMenagementList[i].m_unStorageOffset;
+			SaveMenagementFile(Menagement, RMLReturnValue.nCounts, i * 29 + sizeof(int));
+			return i;
+		}
+	}
+	//RMLReturnValue.nCounts - 1   ：下标是从0开始算的
+	Menagement.m_unStorageOffset = RMLReturnValue.ptrMenagementList[RMLReturnValue.nCounts - 1].m_unStorageOffset +
+		RMLReturnValue.ptrMenagementList[RMLReturnValue.nCounts - 1].m_nLength;
+	//把管理表存到文件末尾
+	SaveMenagementFile(Menagement, RMLReturnValue.nCounts + 1, RMLReturnValue.nCounts * 29 + sizeof(int));
+	return -1;
+}
+//添加数据
+void AddDate(struct tagLinkMan bufDate)
+{
+	tagReadMenagementListReturn RMLReturnValue = ReadMenagementList();
+	//管理表
+	tagMenagementDate Menagement = SetMenagement(bufDate);
+	if (RMLReturnValue.ptrMenagementList == NULL)
+	{
+		SaveMenagementFile(Menagement, 1, sizeof(unsigned int));
+		SaveDateFile(bufDate, 0);
+	}
+	else
+	{
+		int nValue = FindSpase(Menagement, RMLReturnValue);
+		//把数据存到文件末尾
+		if (nValue == -1)
+		{
+			//下标从0开始算
+			SaveDateFile(bufDate, RMLReturnValue.ptrMenagementList[RMLReturnValue.nCounts - 1].m_unStorageOffset + 
+				RMLReturnValue.ptrMenagementList[RMLReturnValue.nCounts - 1].m_nLength);
+		}
+		else
+		{
+			SaveDateFile(bufDate, RMLReturnValue.ptrMenagementList[nValue].m_unStorageOffset);
+		}
+	}
+	free(RMLReturnValue.ptrMenagementList);
+	RMLReturnValue.ptrMenagementList = NULL;
+}
+//设置管理表数据
+tagMenagementDate SetMenagement(struct tagLinkMan bufDate)
+{
+	tagMenagementDate Menagement;
+	Menagement.m_chSign = 0x46;
+	Menagement.m_nNameLength = strlen(bufDate.m_pName) + 1;
+	Menagement.m_nLocationLength = strlen(bufDate.m_pLocation) + 1;
+	Menagement.m_nPhoneLength = strlen(bufDate.m_pPhone) + 1;
+	Menagement.m_nbirthdayLength = strlen(bufDate.m_pbirthday) + 1;
+	Menagement.m_nremarkLength = strlen(bufDate.m_premark) + 1;
+	Menagement.m_unStorageOffset = 0;
+	Menagement.m_nLength = Menagement.m_nNameLength + Menagement.m_nLocationLength + Menagement.m_nPhoneLength +
+	Menagement.m_nbirthdayLength + Menagement.m_nremarkLength;
+	return Menagement;
+}
+//写数据到文件
+void SaveDateFile(tagLinkMan pDate, int nOffset)
+{
+	FILE *fpDate = fopen("Date.txt", "rb+");
+	if (fpDate == NULL)
+	{
+		fpDate = fopen("Date.txt", "wb+");
+	}
+	fseek(fpDate, nOffset, SEEK_SET);
+	fwrite(pDate.m_pName, strlen(pDate.m_pName) + 1, 1, fpDate);
+	fwrite(pDate.m_pLocation, strlen(pDate.m_pLocation) + 1, 1, fpDate);
+	fwrite(pDate.m_pPhone, strlen(pDate.m_pPhone) + 1, 1, fpDate);
+	fwrite(pDate.m_pbirthday, strlen(pDate.m_pbirthday) + 1, 1, fpDate);
+	fwrite(pDate.m_premark, strlen(pDate.m_premark) + 1, 1, fpDate);
+	fflush(fpDate);
+	fclose(fpDate);
+}
+//写管理表到文件
+void SaveMenagementFile(tagMenagementDate Menagement,int nCounts, int nOffset)
+{
+	FILE *fpMenagement = fopen("MenagementDateList.txt", "rb+");
+	if (fpMenagement == NULL)
+	{
+		fpMenagement = fopen("MenagementDateList.txt", "wb+");
+	}
+	fseek(fpMenagement, 0, SEEK_SET);
+	fwrite(&nCounts, sizeof( unsigned int), 1, fpMenagement);
+	fseek(fpMenagement, nOffset, SEEK_SET);
+	fwrite(&Menagement.m_unStorageOffset, sizeof(unsigned int), 1, fpMenagement);
+	fwrite(&Menagement.m_chSign, sizeof(char), 1, fpMenagement);
+	fwrite(&Menagement.m_nLength, sizeof(unsigned int), 1, fpMenagement);
+	fwrite(&Menagement.m_nNameLength, sizeof(unsigned int), 1, fpMenagement);
+	fwrite(&Menagement.m_nLocationLength, sizeof(unsigned int), 1, fpMenagement);
+	fwrite(&Menagement.m_nPhoneLength, sizeof(unsigned int), 1, fpMenagement);
+	fwrite(&Menagement.m_nbirthdayLength, sizeof(unsigned int), 1, fpMenagement);
+	fwrite(&Menagement.m_nremarkLength, sizeof(unsigned int), 1, fpMenagement);
+	fflush(fpMenagement);
+	fclose(fpMenagement);
+}
+void DeleteDate(int nNitem)
+{
+	tagReadMenagementListReturn RMLReturnValue = ReadMenagementList();
+	if (!IsRightSign(RMLReturnValue.ptrMenagementList[nNitem].m_chSign))
+	{
+		RMLReturnValue.ptrMenagementList[nNitem].m_chSign = 'R';
+		SaveMenagementFile(RMLReturnValue.ptrMenagementList[nNitem], RMLReturnValue.nCounts, nNitem * 29 + sizeof(int));
+	}
+	free(RMLReturnValue.ptrMenagementList);
+	RMLReturnValue.ptrMenagementList = NULL;
+}
+//修改联系人
+int Revise(int nNitem, struct tagLinkMan bufDate)
+{
+	tagReadMenagementListReturn RMLReturnValue = ReadMenagementList();
+	tagMenagementDate Menagement = SetMenagement(bufDate);
+	if (!IsRightSign(RMLReturnValue.ptrMenagementList[nNitem].m_chSign))
+	{
+		if (RMLReturnValue.ptrMenagementList[nNitem].m_nLength >= Menagement.m_nLength )
+		{
+			if (RMLReturnValue.ptrMenagementList[nNitem].m_nLength - Menagement.m_nLength >= 8)
+			{
+				RMLReturnValue.nCounts += 1;
+				NewSpace(RMLReturnValue, Menagement, nNitem);
+			}
+			Menagement.m_unStorageOffset = RMLReturnValue.ptrMenagementList[nNitem].m_unStorageOffset;
+			SaveMenagementFile(Menagement, RMLReturnValue.nCounts, nNitem * 29 + sizeof(int));
+			SaveDateFile(bufDate, RMLReturnValue.ptrMenagementList[nNitem].m_unStorageOffset);
+			return 1;
+		}
+		else
+		{
+			DeleteDate(nNitem);
+		}
+	}
+	AddDate(bufDate);
+	free(RMLReturnValue.ptrMenagementList);
+	RMLReturnValue.ptrMenagementList = NULL;
+	return 1;
+}
+//查找联系人
+tagLinkMan FindMan(int nNitem)
+{	
+	tagLinkMan people = {NULL};
+	FILE *fpDate = fopen("Date.txt", "rb+");
+	if (fpDate == NULL)
+	{
+		return people;
+	}
+	tagMenagementDate Menagement = ReadMenagementONE(nNitem);
+	people.m_pbirthday = (char *)malloc(Menagement.m_nbirthdayLength );
+	people.m_pLocation = (char *)malloc(Menagement.m_nLocationLength );
+	people.m_pName = (char *)malloc(Menagement.m_nNameLength );
+	people.m_pPhone = (char *)malloc(Menagement.m_nPhoneLength );
+	people.m_premark = (char *)malloc(Menagement.m_nremarkLength );
+	if (!IsRightSign(Menagement.m_chSign))
+	{
+		fseek(fpDate, Menagement.m_unStorageOffset, SEEK_SET); 
+		fread(people.m_pName, Menagement.m_nNameLength, 1, fpDate);
+		fread(people.m_pLocation, Menagement.m_nLocationLength, 1, fpDate);
+		fread(people.m_pPhone, Menagement.m_nPhoneLength, 1, fpDate);
+		fread(people.m_pbirthday, Menagement.m_nbirthdayLength, 1, fpDate);
+		fread(people.m_premark, Menagement.m_nremarkLength, 1, fpDate);
+	}
+	else
+	{
+		people.m_pName = NULL;
+	}
+	//memset(&people, 0, sizeof(tagMenagementDate));
+	return people;
+}
+
+
+int FreeSpase(struct tagLinkMan bufDate)
+{
+// 	free(bufDate.m_pbirthday);
+// 	free(bufDate.m_pLocation);
+// 	free(bufDate.m_pName);
+// 	free(bufDate.m_pPhone);
+// 	free(bufDate.m_premark);
+
+	bufDate.m_pbirthday = NULL;
+	bufDate.m_pLocation = NULL;
+	bufDate.m_pName = NULL;
+	bufDate.m_pPhone = NULL;
+	bufDate.m_premark = NULL;
+	return 1;
+}
